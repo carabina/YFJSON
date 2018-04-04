@@ -153,6 +153,17 @@ extension JSON {
     
 }
 
+/// JSONRawType
+public enum JSONRawType: Int {
+    case string
+    case number
+    case bool
+    case array
+    case dictionary
+    case null
+}
+
+// MARK: - NSNumber + Extension
 extension NSNumber {
     
     private var trueNumber: NSNumber { return NSNumber(value: true) }
