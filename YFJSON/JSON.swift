@@ -49,14 +49,14 @@ public struct JSON {
 }
 
 // MARK: - Subscript
-extension JSON {
+public extension JSON {
     
-    public subscript(index: Int) -> JSON {
+    subscript(index: Int) -> JSON {
         guard let rawArray = self.object as? [Any], rawArray.indices.contains(index) else { return JSON() }
         return JSON(jsonObject: rawArray[index])
     }
     
-    public subscript(key: String) -> JSON {
+    subscript(key: String) -> JSON {
         guard let rawDictionary = (self.object as? [String : Any])?[key] else { return JSON() }
         return JSON(jsonObject: rawDictionary)
     }
@@ -64,7 +64,7 @@ extension JSON {
 }
 
 // MARK: - Values
-extension JSON {
+public extension JSON {
     
     var int: Int? {
         return self.number?.intValue
