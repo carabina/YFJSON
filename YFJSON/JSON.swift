@@ -10,27 +10,60 @@ import Foundation
 
 public struct JSON {
     
-    public var rawType: JSONRawType {
-        switch self.object {
-        case is String:
-            return .string
-        case let number as NSNumber:
-            return number.isBool ? .bool : .number
-        case is [Any]:
-            return .array
-        case is [String : Any]:
-            return .dictionary
-        default:
-            return .null
+    public private(set) var rawType: JSONType = .null
+    
+    private var object: Any {
+        set {
+            switch newValue {
+            case let array as [Any]:
+                self.rawType = .array
+                self.rawArray = array
+            case let dictionary as [String : Any]:
+                self.rawType = .dictionary
+                self.rawDictionary = dictionary
+            case let number as NSNumber:
+                if number.isBool {
+                    self.rawType = .bool
+                    self.rawBool = number.boolValue
+                } else {
+                    self.rawType = .number
+                    self.rawNumber = number
+                }
+            case let string as String:
+                self.rawType = .string
+                self.rawString = string
+            case let bool as Bool:
+                self.rawType = .bool
+                self.rawBool = bool
+            default:
+                self.rawNull = NSNull()
+            }
+            
         }
-        
+        get {
+            switch self.rawType {
+            case .array:
+                return self.rawType
+            case .dictionary:
+                return self.rawDictionary
+            case .number:
+                return self.rawNumber.isBool ? self.rawBool : self.rawNumber
+            case .string:
+                return self.rawString
+            case .bool:
+                return self.rawBool
+            default:
+                return self.rawNull
+            }
+        }
     }
     
-    private var object: Any
-    
-    public init() {
-        self.init(jsonObject: NSNull())
-    }
+    private var rawArray: [Any] = []
+    private var rawDictionary: [String: Any] = [:]
+    private var rawString: String = ""
+    private var rawNumber: NSNumber = 0
+    private var rawBool: Bool = false
+    private var rawNull: NSNull = NSNull()
     
     public init?(stringJSON: String, using encoding: String.Encoding = .utf8) {
         guard let data = stringJSON.data(using: encoding) else { return nil }
@@ -42,29 +75,82 @@ public struct JSON {
         self.init(jsonObject: object)
     }
     
+    private init() {
+        self.init(jsonObject: NSNull())
+    }
+    
     private init(jsonObject: Any) {
         self.object = jsonObject
     }
     
 }
 
+// MARK: - JSONType
+public enum JSONType: Int {
+    case string
+    case number
+    case bool
+    case array
+    case dictionary
+    case null
+}
+
 // MARK: - Subscript
 public extension JSON {
     
     subscript(index: Int) -> JSON {
-        guard let rawArray = self.object as? [Any], rawArray.indices.contains(index) else { return JSON() }
+        guard self.rawType == .array, self.rawArray.indices.contains(index) else {
+            return JSON()
+        }
         return JSON(jsonObject: rawArray[index])
     }
     
     subscript(key: String) -> JSON {
-        guard let rawDictionary = (self.object as? [String : Any])?[key] else { return JSON() }
-        return JSON(jsonObject: rawDictionary)
+        guard self.rawType == .dictionary, let dictionary = self.rawDictionary[key] else {
+            return JSON()
+        }
+        return JSON(jsonObject: dictionary)
     }
     
 }
 
 // MARK: - Values
 public extension JSON {
+    
+    var array: [JSON]? {
+        guard self.rawType == .array else { return nil }
+        return self.rawArray.map { JSON(jsonObject: $0) }
+    }
+    
+    var dictionary: [String: JSON]? {
+        guard self.rawType == .dictionary else { return nil }
+        
+        var dictionary: [String : JSON] = [:]
+        
+        for (key, value) in self.rawDictionary {
+            dictionary[key] = JSON(jsonObject: value)
+        }
+        
+        return dictionary
+        
+    }
+    
+    var number: NSNumber? {
+        switch self.rawType {
+        case .number:
+            return self.rawNumber
+            
+        case .string:
+            let decimal = NSDecimalNumber(string: self.rawString)
+            return (decimal == NSDecimalNumber.notANumber) ? nil : decimal
+            
+        case .bool:
+            return NSNumber(value: self.rawBool)
+            
+        default:
+            return nil
+        }
+    }
     
     var int: Int? {
         return self.number?.intValue
@@ -78,33 +164,16 @@ public extension JSON {
         return self.number?.doubleValue
     }
     
-    var number: NSNumber? {
-        switch self.object {
-        case let number as NSNumber:
-            return number
-            
-        case let string as String:
-            let decimal = NSDecimalNumber(string: string)
-            return (decimal == NSDecimalNumber.notANumber) ? nil : decimal
-            
-        case let bool as Bool:
-            return NSNumber(value: bool)
-            
-        default:
-            return nil
-        }
-    }
-    
     var string: String? {
-        switch self.object {
-        case let string as String:
-            return string
+        switch self.rawType {
+        case .string:
+            return self.rawString
             
-        case let bool as Bool:
-            return bool ? "true" : "false"
+        case .bool:
+            return self.rawBool ? "true" : "false"
             
-        case is NSNumber:
-            return self.number?.stringValue
+        case .number:
+            return self.rawNumber.stringValue
             
         default:
             return nil
@@ -112,17 +181,17 @@ public extension JSON {
     }
     
     var bool: Bool? {
-        switch self.object {
-        case let bool as Bool:
-            return bool
+        switch self.rawType {
+        case .bool:
+            return self.rawBool
             
-        case let number as NSNumber:
-            return Bool(exactly: number)
+        case .number:
+            return Bool(exactly: self.rawNumber)
             
-        case let string as String:
-            if ["true", "yes", "t", "y", "1"].contains(string) {
+        case .string:
+            if ["true", "yes", "t", "y", "1"].contains(self.rawString) {
                 return true
-            } else if ["false", "no", "f", "n", "0"].contains(string) {
+            } else if ["false", "no", "f", "n", "0"].contains(self.rawString) {
                 return false
             } else {
                 return nil
@@ -134,11 +203,11 @@ public extension JSON {
     }
     
     var url: URL? {
-        guard let string = self.string else { return nil }
+        guard self.rawType == .string else { return nil }
         
-        if let url = URL(string: string) {
+        if let url = URL(string: self.rawString) {
             return url
-        } else if let encodedString = string.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
+        } else if let encodedString = self.rawString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
             return URL(string: encodedString)
         } else {
             return nil
@@ -147,24 +216,67 @@ public extension JSON {
     }
     
     var null: NSNull? {
-        guard self.rawType == .null else { return nil }
-        return NSNull()
+        return self.rawType == .null ? NSNull() : nil
     }
     
 }
 
-/// JSONRawType
-public enum JSONRawType: Int {
-    case string
-    case number
-    case bool
-    case array
-    case dictionary
-    case null
+// MARK: - CustomStringConvertible, CustomDebugStringConvertible
+extension JSON: CustomStringConvertible, CustomDebugStringConvertible {
+    
+    public var description: String {
+        
+        switch self.rawType {
+        case .array:
+            return self.rawArray.description
+        case .dictionary:
+            return self.rawDictionary.description
+        case .number:
+            return self.rawNumber.description
+        case .string:
+            return self.rawString
+        case .bool:
+            return self.rawBool.description
+        default:
+            return self.rawNull.description
+        }
+        
+        
+    }
+    
+    public var debugDescription: String {
+        return description
+    }
+    
+}
+
+// MARK: - Equatable
+extension JSON: Equatable {
+    
+    public static func == (lhs: JSON, rhs: JSON) -> Bool {
+        
+        switch (lhs.rawType, rhs.rawType) {
+        case (.number, .number):
+            return lhs.rawNumber == rhs.rawNumber
+        case (.string, .string):
+            return lhs.rawString == rhs.rawString
+        case (.bool, .bool):
+            return lhs.rawBool == rhs.rawBool
+        case (.array, .array):
+            return lhs.rawArray as NSArray == rhs.rawArray as NSArray
+        case (.dictionary, .dictionary):
+            return lhs.rawDictionary as NSDictionary == rhs.rawDictionary as NSDictionary
+        case (.null, .null):
+            return true
+        default:
+            return false
+        }
+    }
+    
 }
 
 // MARK: - NSNumber + Extension
-extension NSNumber {
+fileprivate extension NSNumber {
     
     private var trueNumber: NSNumber { return NSNumber(value: true) }
     private var falseNumber: NSNumber { return NSNumber(value: false) }
